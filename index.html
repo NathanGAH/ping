@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ping Me</title>
+  <title>Ping Chat</title>
   <style>
     body {
       font-family: system-ui, -apple-system, sans-serif;
@@ -24,48 +24,26 @@
       border-radius: 16px;
       box-shadow: 0 8px 24px rgba(0,0,0,0.4);
       width: 100%;
-      max-width: 380px;
+      max-width: 400px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
-    h2 { margin-top: 0; text-align: center; }
-    select, input, button {
-      width: 100%;
-      padding: 12px;
-      margin: 6px 0;
-      border-radius: 8px;
-      border: 1px solid #333;
-      font-size: 15px;
-      box-sizing: border-box;
-    }
-    select, input { background: #2a2a2a; color: white; }
-    button {
-      background: #5865F2;
-      color: white;
-      font-weight: bold;
-      border: none;
-      cursor: pointer;
-    }
-    button:hover { background: #4752C4; }
-    button:disabled { background: #444; cursor: not-allowed; }
-    #status { margin-top: 8px; font-size: 13px; text-align: center; min-height: 18px; }
-    
-    /* Live Chat Feed */
-    .chat-box {
-      margin-top: 16px;
-      border-top: 1px solid #333;
-      padding-top: 12px;
-    }
-    .chat-header {
-      font-size: 12px;
-      color: #aaa;
-      margin-bottom: 8px;
+    .header {
       display: flex;
       justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #333;
+      padding-bottom: 10px;
     }
+    .header h2 { margin: 0; font-size: 18px; }
+    #connStatus { font-size: 12px; color: #aaa; }
+    
     #messages {
       background: #141414;
-      border-radius: 8px;
-      padding: 10px;
-      height: 160px;
+      border-radius: 10px;
+      padding: 12px;
+      height: 260px;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
@@ -73,59 +51,95 @@
       font-size: 14px;
     }
     .msg {
-      padding: 8px 10px;
-      border-radius: 8px;
-      max-width: 85%;
+      padding: 8px 12px;
+      border-radius: 12px;
+      max-width: 80%;
       word-wrap: break-word;
+      line-height: 1.4;
     }
-    .msg.friend { background: #2b2d31; align-self: flex-end; color: #e0e0e0; }
-    .msg.you { background: #5865F2; align-self: flex-start; color: #fff; }
-    .msg-time { font-size: 10px; opacity: 0.7; display: block; margin-top: 2px; }
+    .msg.friend { background: #2b2d31; align-self: flex-end; color: #e0e0e0; border-bottom-right-radius: 4px; }
+    .msg.you { background: #5865F2; align-self: flex-start; color: #fff; border-bottom-left-radius: 4px; }
+    .msg-time { font-size: 10px; opacity: 0.7; display: block; margin-top: 4px; }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+    }
+    input {
+      flex: 1;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #333;
+      background: #2a2a2a;
+      color: white;
+      font-size: 15px;
+      outline: none;
+    }
+    input:focus { border-color: #5865F2; }
+    button {
+      padding: 0 18px;
+      border-radius: 8px;
+      background: #5865F2;
+      color: white;
+      font-weight: bold;
+      border: none;
+      cursor: pointer;
+      font-size: 15px;
+    }
+    button:hover { background: #4752C4; }
+    button:disabled { background: #444; cursor: not-allowed; }
+    #status { font-size: 12px; text-align: center; min-height: 16px; margin-top: -6px; }
   </style>
 </head>
 <body>
   <div class="card">
-    <h2>Ping</h2>
-    <select id="gameSelect">
-      <option value="Fortnite">Fortnite</option>
-      <option value="Geometry Dash">Geometry Dash</option>
-      <option value="Scratch / Coding">Scratch / Coding</option>
-      <option value="Other">Other</option>
-    </select>
-    <input type="text" id="noteInput" placeholder="Message or note..." maxlength="120">
-    <button id="pingBtn" onclick="sendPing()">Send Ping / Message</button>
-    <div id="status"></div>
-
-    <div class="chat-box">
-      <div class="chat-header">
-        <span>Chat Fees</span>
-        <span id="connStatus">Connecting...</span>
-      </div>
-      <div id="messages"></div>
+    <div class="header">
+      <h2>💬 Ping Chat</h2>
+      <span id="connStatus">🟡 Connecting...</span>
     </div>
+
+    <div id="messages"></div>
+
+    <div class="input-row">
+      <input type="text" id="msgInput" placeholder="Type a message & press Enter..." maxlength="200" autocomplete="off">
+      <button id="sendBtn" onclick="sendMessage()">Send</button>
+    </div>
+    <div id="status"></div>
   </div>
 
   <script>
     // REPLACE THIS WITH YOUR EXACT NTFY TOPIC NAME
-    const TOPIC = "nathanpingalert8888";
+    const TOPIC = "YOUR_SECRET_TOPIC_NAME";
+    
     const messagesDiv = document.getElementById("messages");
+    const msgInput = document.getElementById("msgInput");
+    const sendBtn = document.getElementById("sendBtn");
+    const statusDiv = document.getElementById("status");
+    let isSending = false;
 
-    // 1. Listen for incoming messages in real-time (including last 12 hours of history)
+    // Trigger send when pressing Enter
+    msgInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+      }
+    });
+
+    // Listen for incoming messages in real-time
     const eventSource = new EventSource(`https://ntfy.sh/${TOPIC}/sse?since=12h`);
 
     eventSource.onopen = () => {
-      document.getElementById("connStatus").textContent = "Live";
+      document.getElementById("connStatus").textContent = "🟢 Live";
     };
 
     eventSource.onerror = () => {
-      document.getElementById("connStatus").textContent = "Reconnecting...";
+      document.getElementById("connStatus").textContent = "🔴 Reconnecting...";
     };
 
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.event !== "message") return;
 
-      // Distinguish between pings sent from this webpage vs replies sent from your phone/PC
       const isFromWeb = data.tags && data.tags.includes("web_ping");
       appendMessage(data.message, isFromWeb ? "friend" : "you", data.time);
     };
@@ -146,42 +160,37 @@
       }[tag]));
     }
 
-    // 2. Send a ping/message from the webpage
-    async function sendPing() {
-      const btn = document.getElementById("pingBtn");
-      const status = document.getElementById("status");
-      const game = document.getElementById("gameSelect").value;
-      const noteInput = document.getElementById("noteInput");
-      const note = noteInput.value.trim();
+    async function sendMessage() {
+      const text = msgInput.value.trim();
+      if (!text || isSending) return;
 
-      btn.disabled = true;
-      status.textContent = "Sending...";
-
-      const message = note ? `[${game}] ${note}` : `Hop on ${game}!`;
+      isSending = true;
+      sendBtn.disabled = true;
+      statusDiv.textContent = "";
 
       try {
         const response = await fetch(`https://ntfy.sh/${TOPIC}`, {
           method: "POST",
-          body: message,
+          body: text,
           headers: {
-            "Title": "Friend Ping",
+            "Title": "Friend Message",
             "Priority": "high",
-            "Tags": "video_game,web_ping"
+            "Tags": "speech_balloon,web_ping"
           }
         });
 
         if (response.ok) {
-          noteInput.value = "";
-          status.textContent = "Sent!";
-          status.style.color = "#4ade80";
-          setTimeout(() => { btn.disabled = false; status.textContent = ""; }, 5000); // 5s cooldown for chatting
+          msgInput.value = "";
+          msgInput.focus();
         } else {
           throw new Error("Server error");
         }
       } catch (err) {
-        status.textContent = "Failed to send.";
-        status.style.color = "#f87171";
-        btn.disabled = false;
+        statusDiv.textContent = "❌ Failed to send. Check connection.";
+        statusDiv.style.color = "#f87171";
+      } finally {
+        isSending = false;
+        sendBtn.disabled = false;
       }
     }
   </script>
