@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ping Chat</title>
+  <title>Private Ping Chat</title>
   <style>
     body {
       font-family: system-ui, -apple-system, sans-serif;
@@ -61,10 +61,7 @@
     .msg.you { background: #5865F2; align-self: flex-start; color: #fff; border-bottom-left-radius: 4px; }
     .msg-time { font-size: 10px; opacity: 0.7; display: block; margin-top: 4px; }
 
-    .input-row {
-      display: flex;
-      gap: 8px;
-    }
+    .input-row { display: flex; gap: 8px; }
     input {
       flex: 1;
       padding: 12px;
@@ -89,38 +86,97 @@
     button:hover { background: #4752C4; }
     button:disabled { background: #444; cursor: not-allowed; }
     #status { font-size: 12px; text-align: center; min-height: 16px; margin-top: -6px; }
+
+    #setupScreen { display: none; flex-direction: column; gap: 12px; text-align: center; }
+    #chatScreen { display: none; flex-direction: column; gap: 12px; }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="header">
-      <h2>💬 Ping Chat</h2>
-      <span id="connStatus">🟡 Connecting...</span>
+    <!-- Setup Screen (Only shown if he somehow opens it with no secret code) -->
+    <div id="setupScreen">
+      <h2>🔒 Enter Secret Room Code</h2>
+      <p style="font-size: 13px; color: #aaa; margin: 0;">Enter your shared secret code to connect.</p>
+      <input type="password" id="roomInput" placeholder="Secret code..." autocomplete="off">
+      <button onclick="saveAndJoin(document.getElementById('roomInput').value)">Enter Chat</button>
     </div>
 
-    <div id="messages"></div>
+    <!-- Main Chat Screen -->
+    <div id="chatScreen">
+      <div class="header">
+        <h2>💬 Secure Ping Chat</h2>
+        <span id="connStatus">🟡 Connecting...</span>
+      </div>
 
-    <div class="input-row">
-      <input type="text" id="msgInput" placeholder="Type a message & press Enter..." maxlength="200" autocomplete="off">
-      <button id="sendBtn" onclick="sendMessage()">Send</button>
+      <div id="messages"></div>
+
+      <div class="input-row">
+        <input type="text" id="msgInput" placeholder="Type a message & press Enter..." maxlength="200" autocomplete="off">
+        <button id="sendBtn" onclick="sendMessage()">Send</button>
+      </div>
+      <div id="status"></div>
     </div>
-    <div id="status"></div>
   </div>
 
   <script>
-    // REPLACE THIS WITH YOUR EXACT NTFY TOPIC NAME
-    const TOPIC = "nathanpingalert8888";
-    
+    let TOPIC = "";
+    let eventSource = null;
+    const chimeSound = new Audio("data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2ecHFuDoWqNfnvEoq7Z6e8AAABx");
+
     const messagesDiv = document.getElementById("messages");
     const msgInput = document.getElementById("msgInput");
     const sendBtn = document.getElementById("sendBtn");
     const statusDiv = document.getElementById("status");
     let isSending = false;
 
-    // Built-in subtle chime sound encoded as base64 (zero external file dependency)
-    const chimeSound = new Audio("data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2ecHFuDoWqNfnvEoq7Z6e8AAABx");
+    async function hashString(str) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(str);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
 
-    // Trigger send when pressing Enter
+    // Auto-load on page start
+    window.addEventListener("DOMContentLoaded", async () => {
+      // 1. Check if there's a code in the URL hash (e.g. #mysecretcode)
+      let code = window.location.hash.substring(1).trim();
+
+      if (code) {
+        // Save it to browser storage for future visits
+        localStorage.setItem("ping_room_code", code);
+      } else {
+        // 2. Otherwise check if it was previously saved on this Chromebook
+        code = localStorage.getItem("ping_room_code");
+      }
+
+      if (code) {
+        // We have a code! Skip setup entirely.
+        TOPIC = await hashString(code);
+        document.getElementById("chatScreen").style.display = "flex";
+        msgInput.focus();
+        initChat();
+      } else {
+        // No code found anywhere, show the manual fallback input box
+        document.getElementById("setupScreen").style.display = "flex";
+      }
+    });
+
+    async function saveAndJoin(code) {
+      code = code.trim();
+      if (!code) return;
+      localStorage.setItem("ping_room_code", code);
+      TOPIC = await hashString(code);
+      document.getElementById("setupScreen").style.display = "none";
+      document.getElementById("chatScreen").style.display = "flex";
+      msgInput.focus();
+      initChat();
+    }
+
+    document.getElementById("roomInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") saveAndJoin(e.target.value);
+    });
+
     msgInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
@@ -128,49 +184,44 @@
       }
     });
 
-    // Listen for incoming messages in real-time
-    const eventSource = new EventSource(`https://ntfy.sh/${TOPIC}/sse?since=12h`);
+    function initChat() {
+      eventSource = new EventSource(`https://ntfy.sh/${TOPIC}/sse?since=12h`);
 
-    eventSource.onopen = () => {
-      document.getElementById("connStatus").textContent = "🟢 Live";
-    };
+      eventSource.onopen = () => {
+        document.getElementById("connStatus").textContent = "🟢 Live";
+      };
 
-    eventSource.onerror = () => {
-      document.getElementById("connStatus").textContent = "🔴 Reconnecting...";
-    };
+      eventSource.onerror = () => {
+        document.getElementById("connStatus").textContent = "🔴 Reconnecting...";
+      };
 
-    eventSource.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.event !== "message") return;
+      eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.event !== "message") return;
 
-      const isFromWeb = data.tags && data.tags.includes("web_ping");
-      const text = data.message;
+        const isFromWeb = data.tags && data.tags.includes("web_ping");
+        const text = data.message;
 
-      // If the message came from YOU (not from his web page)
-      if (!isFromWeb) {
-        // Check for special commands
-        if (text.startsWith("/commands ")) {
-          const cmd = text.replace("/commands ", "").trim().toLowerCase();
-          
-          if (cmd === "clear") {
-            messagesDiv.innerHTML = "";
-            return; // Don't print the command itself to chat
-          } else if (cmd === "notify") {
-            // Play sound and force a browser notification if permitted
-            chimeSound.play().catch(() => {});
-            if (Notification.permission === "granted") {
-              new Notification("Ping Chat", { body: "New alert from Nathan!" });
+        if (!isFromWeb) {
+          if (text.startsWith("/commands ")) {
+            const cmd = text.replace("/commands ", "").trim().toLowerCase();
+            if (cmd === "clear") {
+              messagesDiv.innerHTML = "";
+              return;
+            } else if (cmd === "notify") {
+              chimeSound.play().catch(() => {});
+              if (Notification.permission === "granted") {
+                new Notification("Ping Chat", { body: "New alert from Nathan!" });
+              }
+              return;
             }
-            return;
           }
+          chimeSound.play().catch(e => {});
         }
 
-        // Standard message reply from you -> Play sound & append
-        chimeSound.play().catch(e => console.log("Audio play blocked by browser policy until first interaction"));
-      }
-
-      appendMessage(text, isFromWeb ? "friend" : "you", data.time);
-    };
+        appendMessage(text, isFromWeb ? "friend" : "you", data.time);
+      };
+    }
 
     function appendMessage(text, sender, timestamp) {
       const div = document.createElement("div");
@@ -196,7 +247,6 @@
       sendBtn.disabled = true;
       statusDiv.textContent = "";
 
-      // Ask for notification permission on first use if not already set
       if (Notification.permission === "default") {
         Notification.requestPermission();
       }
@@ -213,13 +263,13 @@
         });
 
         if (response.ok) {
-          msgInput.value = "";
+          msgInput.value = "",
           msgInput.focus();
         } else {
           throw new Error("Server error");
         }
       } catch (err) {
-        statusDiv.textContent = "❌ Failed to send. Check connection.";
+        statusDiv.textContent = "❌ Failed to send.";
         statusDiv.style.color = "#f87171";
       } finally {
         isSending = false;
