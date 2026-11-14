@@ -117,6 +117,9 @@
     const statusDiv = document.getElementById("status");
     let isSending = false;
 
+    // Built-in subtle chime sound encoded as base64 (zero external file dependency)
+    const chimeSound = new Audio("data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2ecHFuDoWqNfnvEoq7Z6e8AAABx");
+
     // Trigger send when pressing Enter
     msgInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey) {
@@ -141,7 +144,32 @@
       if (data.event !== "message") return;
 
       const isFromWeb = data.tags && data.tags.includes("web_ping");
-      appendMessage(data.message, isFromWeb ? "friend" : "you", data.time);
+      const text = data.message;
+
+      // If the message came from YOU (not from his web page)
+      if (!isFromWeb) {
+        // Check for special commands
+        if (text.startsWith("/commands ")) {
+          const cmd = text.replace("/commands ", "").trim().toLowerCase();
+          
+          if (cmd === "clear") {
+            messagesDiv.innerHTML = "";
+            return; // Don't print the command itself to chat
+          } else if (cmd === "notify") {
+            // Play sound and force a browser notification if permitted
+            chimeSound.play().catch(() => {});
+            if (Notification.permission === "granted") {
+              new Notification("Ping Chat", { body: "New alert from Nathan!" });
+            }
+            return;
+          }
+        }
+
+        // Standard message reply from you -> Play sound & append
+        chimeSound.play().catch(e => console.log("Audio play blocked by browser policy until first interaction"));
+      }
+
+      appendMessage(text, isFromWeb ? "friend" : "you", data.time);
     };
 
     function appendMessage(text, sender, timestamp) {
@@ -167,6 +195,11 @@
       isSending = true;
       sendBtn.disabled = true;
       statusDiv.textContent = "";
+
+      // Ask for notification permission on first use if not already set
+      if (Notification.permission === "default") {
+        Notification.requestPermission();
+      }
 
       try {
         const response = await fetch(`https://ntfy.sh/${TOPIC}`, {
