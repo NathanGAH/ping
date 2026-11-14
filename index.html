@@ -139,6 +139,15 @@
     const statusDiv = document.getElementById("status");
     let isSending = false;
 
+    // Track processed message IDs and clear timestamps to prevent reload glitches
+    const executedIds = new Set(JSON.parse(localStorage.getItem("ping_executed_ids") || "[]"));
+
+    function markAsExecuted(id) {
+      executedIds.add(id);
+      const arr = Array.from(executedIds).slice(-100); // Keep last 100 IDs
+      localStorage.setItem("ping_executed_ids", JSON.stringify(arr));
+    }
+
     async function hashString(str) {
       const encoder = new TextEncoder();
       const data = encoder.encode(str);
@@ -149,25 +158,20 @@
 
     // Auto-load on page start
     window.addEventListener("DOMContentLoaded", async () => {
-      // 1. Check if there's a code in the URL hash (e.g. #mysecretcode)
       let code = window.location.hash.substring(1).trim();
 
       if (code) {
-        // Save it to browser storage for future visits
         localStorage.setItem("ping_room_code", code);
       } else {
-        // 2. Otherwise check if it was previously saved on this Chromebook
         code = localStorage.getItem("ping_room_code");
       }
 
       if (code) {
-        // We have a code! Skip setup entirely.
         TOPIC = await hashString(code);
         document.getElementById("chatScreen").style.display = "flex";
         msgInput.focus();
         initChat();
       } else {
-        // No code found anywhere, show the manual fallback input box
         document.getElementById("setupScreen").style.display = "flex";
       }
     });
@@ -211,22 +215,39 @@
 
         const isFromWeb = data.tags && data.tags.includes("web_ping");
         const text = data.message;
+        const alreadyProcessed = executedIds.has(data.id);
 
+        // 1. Instantly drop any messages older than the last clear command (prevents flashing on reload)
+        const lastClearTime = Number(localStorage.getItem("ping_clear_time") || 0);
+        if (data.time <= lastClearTime) {
+          return;
+        }
+
+        // 2. Handle incoming commands from your end
         if (!isFromWeb) {
           if (text.startsWith("/commands ")) {
             const cmd = text.replace("/commands ", "").trim().toLowerCase();
             if (cmd === "clear") {
+              localStorage.setItem("ping_clear_time", data.time);
               messagesDiv.innerHTML = "";
               return;
             } else if (cmd === "notify") {
-              chimeSound.play().catch(() => {});
-              if (Notification.permission === "granted") {
-                new Notification("Ping Chat", { body: "New alert from Nathan!" });
+              if (!alreadyProcessed) {
+                markAsExecuted(data.id);
+                chimeSound.play().catch(() => {});
+                if (Notification.permission === "granted") {
+                  new Notification("Ping Chat", { body: "New alert from Nathan!" });
+                }
               }
               return;
             }
           }
-          chimeSound.play().catch(e => {});
+          
+          // Play sound for standard messages only if not already processed on reload
+          if (!alreadyProcessed) {
+            markAsExecuted(data.id);
+            chimeSound.play().catch(e => {});
+          }
         }
 
         appendMessage(text, isFromWeb ? "friend" : "you", data.time);
@@ -273,7 +294,7 @@
         });
 
         if (response.ok) {
-          msgInput.value = "",
+          msgInput.value = "";
           msgInput.focus();
         } else {
           throw new Error("Server error");
